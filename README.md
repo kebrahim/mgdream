@@ -72,11 +72,40 @@ Trigger sync on a schedule with `.github/workflows/sync.yml`, which calls
 `/api/sync` on your deployed URL. Set the `APP_URL` and `SYNC_SECRET` repo
 secrets for it to work.
 
-## Deploying
+## Deploying to Vercel + Supabase
 
-Recommended: [Vercel](https://vercel.com/new) (free tier) for hosting, and a
-free Postgres instance from [Neon](https://neon.tech) or
-[Supabase](https://supabase.com) for `DATABASE_URL`. After the first deploy,
-run the migration once against the production database (`npx drizzle-kit
-migrate` with `DATABASE_URL` pointed at production) and seed it (`npm run
-db:seed`).
+1. **Create the Supabase project** at [supabase.com](https://supabase.com) (free
+   tier). In Project Settings → Database → Connection string, grab two URLs:
+   - **Transaction pooler** (port `6543`) → this is `DATABASE_URL`. The app
+     uses it at runtime; Vercel's serverless functions open many short-lived
+     connections, and only the pooler can handle that without exhausting
+     Postgres's connection limit.
+   - **Direct connection** (port `5432`) → this is `DIRECT_URL`. Migrations
+     (`drizzle-kit migrate`) need a direct connection — pgbouncer's
+     transaction-pooling mode doesn't support everything DDL needs.
+   
+   Both URLs should already include `?sslmode=require`; keep it.
+
+2. **Run the migration and seed against Supabase, from your machine**, before
+   or right after the first deploy:
+   ```bash
+   DATABASE_URL="<pooler-url>" DIRECT_URL="<direct-url>" npx drizzle-kit migrate
+   DATABASE_URL="<pooler-url>" npm run db:seed
+   ```
+
+3. **Deploy to Vercel**: import this repo at [vercel.com/new](https://vercel.com/new)
+   (it auto-detects Next.js, no config needed). In the project's
+   Settings → Environment Variables, set:
+   - `DATABASE_URL` — the Supabase pooler URL
+   - `ADMIN_SECRET` — your own shared secret for `/admin` edits
+   - `SYNC_SECRET` — your own shared secret for the sync endpoint
+   
+   (`DIRECT_URL` isn't needed on Vercel — only for running migrations locally.)
+
+4. **Wire up scheduled syncing**: in the GitHub repo's Settings → Secrets and
+   variables → Actions, add `APP_URL` (your Vercel deployment URL) and
+   `SYNC_SECRET` (same value as in Vercel) so `.github/workflows/sync.yml` can
+   call `/api/sync` on a schedule.
+
+Neon is an equally good free alternative to Supabase here — same pooled vs.
+direct connection-string split, just from Neon's dashboard instead.

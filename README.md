@@ -75,32 +75,43 @@ secrets for it to work.
 ## Deploying to Vercel + Supabase
 
 1. **Create the Supabase project** at [supabase.com](https://supabase.com) (free
-   tier). In Project Settings → Database → Connection string, grab two URLs:
+   tier). In the project's "Connect" dialog, grab two connection strings:
    - **Transaction pooler** (port `6543`) → this is `DATABASE_URL`. The app
      uses it at runtime; Vercel's serverless functions open many short-lived
      connections, and only the pooler can handle that without exhausting
      Postgres's connection limit.
-   - **Direct connection** (port `5432`) → this is `DIRECT_URL`. Migrations
-     (`drizzle-kit migrate`) need a direct connection — pgbouncer's
-     transaction-pooling mode doesn't support everything DDL needs.
-   
-   Both URLs should already include `?sslmode=require`; keep it.
+   - **Session pooler** (port `5432`, same `...pooler.supabase.com` host) →
+     this is `DIRECT_URL`, used only for running migrations. **Don't use the
+     plain "Direct connection" host** (`db.<ref>.supabase.co`) for this — it's
+     IPv6-only unless you pay for Supabase's IPv4 add-on, and most CI/sandbox
+     environments (GitHub Actions included) can't reach it. The session
+     pooler is IPv4-reachable and works fine for migrations.
 
-2. **Run the migration and seed against Supabase, from your machine**, before
-   or right after the first deploy:
-   ```bash
-   DATABASE_URL="<pooler-url>" DIRECT_URL="<direct-url>" npx drizzle-kit migrate
-   DATABASE_URL="<pooler-url>" npm run db:seed
-   ```
+   Both URLs should already include `?sslmode=require` (or `pgbouncer=true`);
+   keep whatever query params Supabase gives you. Fill in the real password
+   in place of `[YOUR-PASSWORD]`, and percent-encode any special characters
+   in it (e.g. `#` → `%23`, `%` → `%25`, `$` → `%24`) — connection strings are
+   parsed as URIs, so unencoded special characters get silently mangled.
+
+2. **Run the migration and seed against Supabase** using the
+   `.github/workflows/db-setup.yml` GitHub Actions workflow — this runs in
+   GitHub's cloud, so no local setup or terminal access is needed:
+   - In the repo's Settings → Secrets and variables → Actions, add repository
+     secrets `DATABASE_URL` (transaction pooler URL) and `DIRECT_URL` (session
+     pooler URL).
+   - Go to the **Actions** tab → **Database setup (migrate + seed)** →
+     **Run workflow**. It applies migrations, then seeds/updates the roster
+     from `src/db/seed-data.ts`. Both steps are idempotent, so it's safe to
+     re-run any time (e.g. after editing the roster).
 
 3. **Deploy to Vercel**: import this repo at [vercel.com/new](https://vercel.com/new)
    (it auto-detects Next.js, no config needed). In the project's
    Settings → Environment Variables, set:
-   - `DATABASE_URL` — the Supabase pooler URL
+   - `DATABASE_URL` — the Supabase transaction pooler URL
    - `ADMIN_SECRET` — your own shared secret for `/admin` edits
    - `SYNC_SECRET` — your own shared secret for the sync endpoint
    
-   (`DIRECT_URL` isn't needed on Vercel — only for running migrations locally.)
+   (`DIRECT_URL` isn't needed on Vercel — only step 2's migration workflow uses it.)
 
 4. **Wire up scheduled syncing**: in the GitHub repo's Settings → Secrets and
    variables → Actions, add `APP_URL` (your Vercel deployment URL) and

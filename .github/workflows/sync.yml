@@ -12,6 +12,10 @@ jobs:
     steps:
       - name: Call sync endpoint
         run: |
+          if [ -z "${APP_URL}" ] || [ -z "${SYNC_SECRET}" ]; then
+            echo "APP_URL and/or SYNC_SECRET repo secrets aren't set yet — skipping (app likely not deployed yet)."
+            exit 0
+          fi
           curl -sf -X POST "${APP_URL}/api/sync" \
             -H "x-sync-secret: ${SYNC_SECRET}"
         env:
